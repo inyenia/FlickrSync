@@ -20,15 +20,15 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeSet;
 
-import javax.xml.parsers.ParserConfigurationException;
-
 import org.scribe.model.Token;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.xml.sax.SAXException;
 
+import com.codahale.metrics.Counter;
+import com.codahale.metrics.Timer;
 import com.flickr.oauth.OAuthHelper;
 import com.flickr.utils.FlickrApi;
+import com.flickr.utils.MultiThreadedRequestExecution;
 
 public class FlickrSync {
   File accessTokenFile;
@@ -52,7 +52,7 @@ public class FlickrSync {
     }
   };
 
-  public FlickrSync(String foldersToBeIgnored) throws IOException {
+  public FlickrSync(String foldersToBeIgnored) {
     accessTokenFile = new File(System.getProperty("java.io.tmpdir"),
         "flickr.tok");
     if (foldersToBeIgnored != null) {
@@ -66,9 +66,17 @@ public class FlickrSync {
   private Token readAccessToken() throws IOException {
     if (!accessTokenFile.exists())
       return null;
-    BufferedReader reader = new BufferedReader(new FileReader(accessTokenFile));
-    Token token = new Token(reader.readLine(), reader.readLine());
-    reader.close();
+    BufferedReader reader = null;
+    Token token = null;
+    try {
+      reader = new BufferedReader(new FileReader(accessTokenFile));
+      token = new Token(reader.readLine(), reader.readLine());
+    } catch (Exception e) {
+      LOG.error("Error while reading access token file", e);
+    } finally {
+      if (reader != null)
+        reader.close();
+    }
     return token;
   }
 
@@ -117,15 +125,15 @@ public class FlickrSync {
   }
 
   private boolean uploadFolders(FlickrApi flickr, Map<String, File> folders,
-      Token accessToken) throws IOException, ParserConfigurationException,
-      SAXException {
+      Token accessToken) {
     for (Entry<String, File> entry : folders.entrySet()) {
       File[] photos = getAllPhotos(entry.getValue());
       Set<File> photoSet = new HashSet<File>();
       for (File f : photos)
         photoSet.add(f);
       if (photoSet.size() > 0)
-        if (!flickr.uploadPhotosToSet(entry.getKey(), photoSet, accessToken, true)) {
+        if (!flickr.uploadPhotosToSet(entry.getKey(), photoSet, accessToken,
+            true)) {
           return false;
         }
 
@@ -133,11 +141,22 @@ public class FlickrSync {
     return true;
   }
 
-  public static void main(String[] args) throws IOException,
-      URISyntaxException, ParserConfigurationException, SAXException {
+  private static void printFinalMetrics() {
+    Counter uploadFailure = FlickrApi.uploadFailure;
+    System.out.println("Total upload failed " + uploadFailure.getCount());
+    Timer photoUpload = MultiThreadedRequestExecution.requestMetrics;
+    System.out.println("Total photos uploaded " + photoUpload.getCount());
+    System.out.println("Avg. time per upload call In Sec" + +(float) 1
+        / photoUpload.getMeanRate());
+    Timer setAddition = FlickrApi.setAdditionMetrics;
+    System.out.println("Total photos added to set " + setAddition.getCount());
+    System.out.println("Avg. time per set addition call In Secs" + (float) 1
+        / setAddition.getMeanRate());
+  }
+  public static void main(String[] args) throws IOException {
     if (args.length < 1) {
       System.out
-          .println("Usage FlickSync [-deleteFromSource] <path to parent folder>");
+          .println("Usage FlickSync [-deleteFromSource] [-foldersToBeIgnored <comma separated list of folder>]<path to parent folder>");
       System.exit(0);
     }
     boolean deleteFromSource = false;
@@ -150,7 +169,7 @@ public class FlickrSync {
         i++;
 
       } else if (args[i].equalsIgnoreCase("-foldersToBeIgnored")) {
-        foldersToBeIgnored = args[i++];
+        foldersToBeIgnored = args[++i];
         i++;
       } else
         parentFolder = args[i++];
@@ -171,7 +190,11 @@ public class FlickrSync {
         if (!desktop.isSupported(Desktop.Action.BROWSE)) {
           System.out.println("Please open the URL in browser :" + authUrl);
         } else {
-          desktop.browse(new URI(authUrl));
+          try {
+            desktop.browse(new URI(authUrl));
+          } catch (URISyntaxException e) {
+            System.out.println("Please open the URL in browser :" + authUrl);
+          }
         }
       }
       String verifier = new BufferedReader(new InputStreamReader(System.in))
@@ -196,7 +219,7 @@ public class FlickrSync {
       }
 
     }
-    LOG.debug("All folders to be processed " + folders);
+    LOG.info("All folders to be processed " + folders);
     LOG.debug("Folder Not Uploaded " + foldersNotUploaded);
     LOG.debug("Photos in each folder" + folderToPhotos);
     if (!sync.uploadFolders(flickr, foldersNotUploaded, accessToken)) {
@@ -211,6 +234,11 @@ public class FlickrSync {
         Set<File> photosToBeUploaded = new HashSet<File>();
         Set<String> photosInSet = flickr.getAllPhotosInSet(photoSet.getId(),
             accessToken);
+        if (photosInSet == null) {
+          LOG.error("Cannot get list of photos in set " + photoSet.getId()
+              + " skipping");
+          continue;
+        }
         for (File photo : photosInFolder) {
           if (!photosInSet.contains(photo.getName())) {
             photosToBeUploaded.add(photo);
@@ -230,6 +258,7 @@ public class FlickrSync {
         }
       }
     }
+    printFinalMetrics();
     System.out.println("Thanks for using FlickrSync");
   }
 

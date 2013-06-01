@@ -30,8 +30,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeSet;
-
-import javax.xml.parsers.ParserConfigurationException;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.http.Header;
 import org.apache.http.entity.ContentType;
@@ -50,8 +49,11 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-import org.xml.sax.SAXException;
 
+import com.codahale.metrics.ConsoleReporter;
+import com.codahale.metrics.Counter;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.Timer;
 import com.flickr.PhotoSet;
 import com.flickr.oauth.OAuthHelper;
 
@@ -60,12 +62,24 @@ public class FlickrApi {
   private OAuthHelper oAuth;
   private static int numOfThreads = 10;
   private static final String NUM_OF_THREADS = "flickrSync.numThreads";
+  private static final MetricRegistry metrics = new MetricRegistry();
+  private static final Timer uploadMetrics = metrics.timer(MetricRegistry.name(
+      FlickrApi.class, "uploadRequests"));
+  public static final Timer setAdditionMetrics = metrics.timer(MetricRegistry
+      .name(FlickrApi.class, "setAddition"));
+  public static final Counter uploadFailure = metrics.counter(MetricRegistry
+      .name(
+      FlickrApi.class, "uploadFailure"));
 
   public FlickrApi(OAuthHelper oAuth) {
     this.oAuth = oAuth;
     String numThreads = System.getProperty(NUM_OF_THREADS);
     if (numThreads != null) {
       numOfThreads = Integer.parseInt(numThreads);
+      ConsoleReporter reporter = ConsoleReporter.forRegistry(metrics)
+          .convertRatesTo(TimeUnit.MINUTES)
+          .convertDurationsTo(TimeUnit.SECONDS).build();
+      reporter.start(1, TimeUnit.MINUTES);
     }
 
   }
@@ -92,7 +106,7 @@ public class FlickrApi {
         }
 
       } catch (Exception e) {
-        e.printStackTrace();
+        LOG.error("Error in call back", e);
       }
 
     }
@@ -116,8 +130,7 @@ public class FlickrApi {
     }
   }
 
-  public Map<String, PhotoSet> getAllSetsOfUser(Token accessToken)
-      throws ParserConfigurationException, SAXException, IOException {
+  public Map<String, PhotoSet> getAllSetsOfUser(Token accessToken) {
     Map<String, String> params = new HashMap<String, String>();
     params.put(API_KEY, oAuth.getApiKey());
     String methodName = FLICKR_METHOD_GET_SET_PHOTOS;
@@ -126,13 +139,13 @@ public class FlickrApi {
     Response response = oAuth.sendRequest(request, accessToken);
     String responseBody = response.getBody();
     LOG.debug("Response of getAllSetsOfUser " + responseBody);
-    Document doc = XMLUtil.getXMLDoc(responseBody);
     Map<String, PhotoSet> photosets = new HashMap<String, PhotoSet>();
     try {
+      Document doc = XMLUtil.getXMLDoc(responseBody);
       NodeList photosetsNodeList = doc.getDocumentElement()
           .getElementsByTagName("photosets");
       if (photosetsNodeList.getLength() == 0) {
-        LOG.debug("User doesn't have any set uploaded on flickr");
+        LOG.info("User doesn't have any set uploaded on flickr");
         return photosets;
       }
       Element element = (Element) (photosetsNodeList.item(0));
@@ -160,23 +173,30 @@ public class FlickrApi {
 
   }
 
-  private String getPhotoIdFromResponse(Response response)
-      throws ParserConfigurationException, SAXException, IOException {
+  private String getPhotoIdFromResponse(Response response) {
     String responseBody = response.getBody();
     LOG.debug("Response from which photo id is to be parsed is " + responseBody);
+    String value = null;
+    try {
     Document doc = XMLUtil.getXMLDoc(responseBody);
     NodeList photoIds = doc.getDocumentElement().getElementsByTagName(PHOTO_ID);
     if (photoIds.getLength() == 0)
       return null;
     Element element = (Element) (photoIds.item(0));
-    LOG.debug("Photo id parsed is " + element.getTextContent());
-    return element.getTextContent();
+      value = element.getTextContent();
+      LOG.debug("Photo id parsed is " + value);
+
+    } catch (Exception e) {
+      LOG.error("Error while parsing photo id");
+      uploadFailure.inc();
+    }
+    return value;
 
   }
 
 
   private Request getRequestForPhotoUpload(String photoName, File photo,
-      Token accessToken) throws IOException {
+      Token accessToken) {
     String url = "http://api.flickr.com/services/upload/";
     OAuthRequest request = new OAuthRequest(Verb.POST, url);
     Map<String, String> postParams = new HashMap<String, String>();
@@ -198,7 +218,12 @@ public class FlickrApi {
         ContentType.APPLICATION_OCTET_STREAM, photoName));
     ByteArrayOutputStream bos = new ByteArrayOutputStream(
         (int) reqEntity.getContentLength());
-    reqEntity.writeTo(bos);
+    try {
+      reqEntity.writeTo(bos);
+    } catch (IOException e) {
+      LOG.error("Error while preparing upload request", e);
+      return null;
+    }
     request.addPayload(bos.toByteArray());
 
     Header contentType = reqEntity.getContentType();
@@ -207,20 +232,25 @@ public class FlickrApi {
 
   }
 
-  public String uploadPhoto(String photoName, File photo, Token accessToken)
-      throws IOException, ParserConfigurationException, SAXException {
+  public String uploadPhoto(String photoName, File photo, Token accessToken) {
     Request request = getRequestForPhotoUpload(photoName, photo, accessToken);
-    Response response = request.send();
+    final Timer.Context context = uploadMetrics.time();
+    Response response;
+    try {
+      response = request.send();
+    } finally {
+      context.stop();
+    }
     return getPhotoIdFromResponse(response);
   }
   public void uploadPhotos(Map<String, File> photos, Token accessToken,
-      CallBack<Response> callback) throws IOException,
-      ParserConfigurationException, SAXException, InterruptedException {
+      CallBack<Response> callback) {
     MultiThreadedRequestExecution executor = new MultiThreadedRequestExecution(
         numOfThreads, callback);
     for (Entry<String, File> photo : photos.entrySet()) {
       Request request = getRequestForPhotoUpload(photo.getKey(),
           photo.getValue(), accessToken);
+      if (request != null)
       executor.addRequest(request);
     }
     executor.shutdown();
@@ -228,8 +258,7 @@ public class FlickrApi {
   }
 
   public boolean addPhotosToSet(String photoSetId, List<String> photoIds,
-      Token accessToken) throws ParserConfigurationException, SAXException,
-      IOException {
+      Token accessToken) {
     boolean success = true;
     for (String photoId : photoIds) {
       if (!addPhotoToSet(photoSetId, photoId, accessToken))
@@ -239,8 +268,7 @@ public class FlickrApi {
   }
 
   private boolean addPhotoToSet(String photoSetId, String photoId,
-      Token accessToken) throws ParserConfigurationException, SAXException,
-      IOException {
+      Token accessToken) {
     LOG.debug("Adding photo " + photoId + " to set " + photoSetId);
     String url = getApiUrl(FLICKR_METHOD_ADD_PHOTO_TO_SET);
     Map<String, String> params = new HashMap<String, String>();
@@ -249,9 +277,16 @@ public class FlickrApi {
     params.put(PHOTO_UNERSCORE_ID, photoId);
     OAuthRequest request = new OAuthRequest(Verb.POST, url);
     addBodyParams(request, params);
-    Response response = oAuth.sendRequest(request, accessToken);
+    Response response;
+    final Timer.Context context = setAdditionMetrics.time();
+    try {
+      response = oAuth.sendRequest(request, accessToken);
+    } finally {
+      context.stop();
+    }
     String responseBody = response.getBody();
     LOG.debug("Response of adding photo to set is " + responseBody);
+    try {
     Document doc = XMLUtil.getXMLDoc(responseBody);
     String status = doc.getFirstChild().getAttributes().getNamedItem("stat")
         .getNodeValue();
@@ -262,12 +297,16 @@ public class FlickrApi {
       if (!code.equals("3"))
         return false;
     }
-    LOG.debug("Added photo " + photoId + " to set " + photoSetId);
+    } catch (Exception e) {
+      LOG.error("Exception in adding photo to set", e);
+      return false;
+    }
+
+    LOG.info("Added photo " + photoId + " to set " + photoSetId);
     return true;
   }
 
-  private String createSet(String name, String primayPhotoId, Token accessToken)
-      throws ParserConfigurationException, SAXException, IOException {
+  private String createSet(String name, String primayPhotoId, Token accessToken) {
     String url = getApiUrl(FLICKR_METHOD_CREATE_SET);
     Map<String, String> params = new HashMap<String, String>();
     params.put(API_KEY, oAuth.getApiKey());
@@ -278,18 +317,24 @@ public class FlickrApi {
     Response response = oAuth.sendRequest(request, accessToken);
     String responseBody = response.getBody();
     LOG.debug("Response of creating set " + responseBody);
-    Document doc = XMLUtil.getXMLDoc(responseBody);
+    Document doc;
+    try {
+      doc = XMLUtil.getXMLDoc(responseBody);
+    } catch (Exception e) {
+      LOG.error("Exception while creating set ", e);
+      return null;
+    }
     NodeList photosets = doc.getDocumentElement()
         .getElementsByTagName(PHOTOSET);
     if (photosets.getLength() == 0)
       return null;
     Element element = (Element) ((photosets).item(0));
+    LOG.info("Created set " + name);
     return element.getAttribute("id");
 
   }
 
-  public Set<String> getAllPhotosInSet(String setId, Token accessToken)
-      throws ParserConfigurationException, SAXException, IOException {
+  public Set<String> getAllPhotosInSet(String setId, Token accessToken) {
     String url = getApiUrl(FLICKR_METHOD_GETPHOTOS);
     Map<String, String> params = new HashMap<String, String>();
     params.put(API_KEY, oAuth.getApiKey());
@@ -299,7 +344,13 @@ public class FlickrApi {
     Response response = oAuth.sendRequest(request, accessToken);
     String responseBody = response.getBody();
     LOG.debug("Response of getting all photos in a set " + responseBody);
-    Document doc = XMLUtil.getXMLDoc(responseBody);
+    Document doc;
+    try {
+      doc = XMLUtil.getXMLDoc(responseBody);
+    } catch (Exception e) {
+      LOG.error("Error while getting photos of set " + setId, e);
+      return null;
+    }
     NodeList nodes = doc.getDocumentElement().getElementsByTagName(PHOTO);
     Set<String> photos = new TreeSet<String>();
     for (int i = 0; i < nodes.getLength(); i++) {
@@ -310,8 +361,7 @@ public class FlickrApi {
   }
 
   public boolean uploadPhotosToSet(String id, Set<File> filesToBeUploaded,
-      Token accessToken, boolean createNewSet) throws IOException,
-      ParserConfigurationException, SAXException {
+      Token accessToken, boolean createNewSet) {
     String setId = null;
     Map<String, File> photos = new HashMap<String, File>();
 
@@ -340,7 +390,9 @@ public class FlickrApi {
         LOG.debug("Uploading photos " + photos);
         callback = new CallBackHandler(setId, this, accessToken);
         uploadPhotos(photos, accessToken, callback);
-        LOG.info("Photos uploaded and added to set");
+        LOG.info("Photos uploaded and added to set with id " + id);
+      } else {
+        return false;
       }
     } catch (Exception e) {
       LOG.error("Error while addingPhotos to set ", e);

@@ -3,11 +3,16 @@ package com.flickr.utils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import org.scribe.model.Request;
 import org.scribe.model.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.codahale.metrics.ConsoleReporter;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.Timer;
 
 public class MultiThreadedRequestExecution implements Runnable {
 
@@ -18,16 +23,28 @@ public class MultiThreadedRequestExecution implements Runnable {
   private boolean shutDown = false;
   private List<Thread> threads = new ArrayList<Thread>();
   private Logger LOG = LoggerFactory.getLogger(this.getClass());
+  static final MetricRegistry metrics = new MetricRegistry();
+  public static final Timer requestMetrics = metrics
+      .timer(MetricRegistry.name(MultiThreadedRequestExecution.class,
+          "requests"));
 
   MultiThreadedRequestExecution(int numOfThreads, CallBack<Response> callback) {
     this.callback = callback;
     this.numOfThreads = numOfThreads;
     requests = new LinkedBlockingQueue<Request>(numOfThreads);
+    ConsoleReporter reporter = ConsoleReporter.forRegistry(metrics)
+        .convertRatesTo(TimeUnit.MINUTES).convertDurationsTo(TimeUnit.SECONDS)
+        .build();
+    reporter.start(1, TimeUnit.MINUTES);
     execute();
   }
 
-  public void addRequest(Request request) throws InterruptedException {
+  public void addRequest(Request request) {
+    try {
     requests.put(request);
+    } catch (Exception e) {
+      LOG.error("Error while waiting for submitting the request", e);
+    }
   }
 
   public void shutdown() {
@@ -44,8 +61,14 @@ public class MultiThreadedRequestExecution implements Runnable {
     Request request = null;
     while (!shutDown) {
       while ((request = requests.poll()) != null) {
-        Response response = request.send();
+        Response response;
+        final Timer.Context context = requestMetrics.time();
+        try {
+          response = request.send();
         LOG.debug("Request completed");
+        } finally {
+          context.stop();
+        }
         responses.add(response);
         if (callback != null)
           callback.call(response);
