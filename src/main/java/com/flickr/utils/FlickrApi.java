@@ -60,7 +60,7 @@ import com.flickr.oauth.OAuthHelper;
 public class FlickrApi {
   private static final Logger LOG = LoggerFactory.getLogger(FlickrApi.class);
   private OAuthHelper oAuth;
-  private static int numOfThreads = 10;
+  private static int numOfThreads = 5;
   private static final String NUM_OF_THREADS = "flickrSync.numThreads";
   private static final MetricRegistry metrics = new MetricRegistry();
   private static final Timer uploadMetrics = metrics.timer(MetricRegistry.name(
