@@ -37,6 +37,7 @@ public class FlickrSync {
   private static final String API_SECRET = "97eb70a795d41310";
   private static final String fileExtensions = ".jpg,.jpeg,.png";
   private Set<String> ignoredFoldersSet = new TreeSet<String>();
+  private Map<String,String> skippedFolders= new HashMap<String, String>();
   private static final FileFilter filter = new FileFilter() {
     public boolean accept(File pathname) {
       if (pathname.isFile()) {
@@ -99,6 +100,10 @@ public class FlickrSync {
       Map<String, List<File>> folderToPhotos) {
     if (parent.isDirectory()) {
       if (!ignoredFoldersSet.contains(parent.getName())) {
+	  if(dirs.containsKey(parent.getName())){
+	      skippedFolders.put(parent.getAbsolutePath(), dirs.get(parent.getName()).getAbsolutePath());
+	      return;
+	  }
         dirs.put(parent.getName(), parent);
         for (File f : parent.listFiles()) {
           if (f.isDirectory()) {
@@ -141,17 +146,17 @@ public class FlickrSync {
     return true;
   }
 
-  private static void printFinalMetrics() {
+  private  void printFinalMetrics() {
+      
+      for(Entry<String,String> entry:skippedFolders.entrySet()){
+	  System.out.println("Folder with path "+entry.getKey() + " was skipped as it had conflicting name with "+entry.getValue());
+      }
     Counter uploadFailure = FlickrApi.uploadFailure;
     System.out.println("Total upload failed " + uploadFailure.getCount());
     Timer photoUpload = MultiThreadedRequestExecution.requestMetrics;
     System.out.println("Total photos uploaded " + photoUpload.getCount());
-    System.out.println("Avg. time per upload call In Sec" + +(float) 1
-        / photoUpload.getMeanRate());
     Timer setAddition = FlickrApi.setAdditionMetrics;
     System.out.println("Total photos added to set " + setAddition.getCount());
-    System.out.println("Avg. time per set addition call In Secs" + (float) 1
-        / setAddition.getMeanRate());
   }
   public static void main(String[] args) throws IOException {
     if (args.length < 1) {
@@ -224,6 +229,7 @@ public class FlickrSync {
     LOG.debug("Photos in each folder" + folderToPhotos);
     if (!sync.uploadFolders(flickr, foldersNotUploaded, accessToken)) {
       LOG.error("Cannot upload all new sets;Quitting");
+      sync.printFinalMetrics();
       System.exit(-1);
     }
     for (Entry<String, List<File>> entry : folderToPhotos.entrySet()) {
@@ -258,7 +264,7 @@ public class FlickrSync {
         }
       }
     }
-    printFinalMetrics();
+    sync.printFinalMetrics();
     System.out.println("Thanks for using FlickrSync");
   }
 

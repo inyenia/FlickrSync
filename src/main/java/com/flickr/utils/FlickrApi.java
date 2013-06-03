@@ -63,8 +63,6 @@ public class FlickrApi {
   private static int numOfThreads = 5;
   private static final String NUM_OF_THREADS = "flickrSync.numThreads";
   private static final MetricRegistry metrics = new MetricRegistry();
-  private static final Timer uploadMetrics = metrics.timer(MetricRegistry.name(
-      FlickrApi.class, "uploadRequests"));
   public static final Timer setAdditionMetrics = metrics.timer(MetricRegistry
       .name(FlickrApi.class, "setAddition"));
   public static final Counter uploadFailure = metrics.counter(MetricRegistry
@@ -234,13 +232,8 @@ public class FlickrApi {
 
   public String uploadPhoto(String photoName, File photo, Token accessToken) {
     Request request = getRequestForPhotoUpload(photoName, photo, accessToken);
-    final Timer.Context context = uploadMetrics.time();
     Response response;
-    try {
-      response = request.send();
-    } finally {
-      context.stop();
-    }
+    response = request.send();
     return getPhotoIdFromResponse(response);
   }
   public void uploadPhotos(Map<String, File> photos, Token accessToken,
