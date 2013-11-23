@@ -48,7 +48,7 @@ public class MultiThreadedRequestExecution implements Runnable {
 	String gaugeName = MetricRegistry.name(
 		MultiThreadedRequestExecution.class, "numOfThreads");
 	localMetrics.register(gaugeName, new Gauge<Integer>() {
-		@Override
+
 		public Integer getValue() {
 		    int result = 0;		    
 		    for (Thread t : threads) {

@@ -10,6 +10,8 @@ import static com.flickr.FlickrConstants.ID;
 import static com.flickr.FlickrConstants.IS_FAMILY;
 import static com.flickr.FlickrConstants.IS_FRIEND;
 import static com.flickr.FlickrConstants.IS_PUBLIC;
+import static com.flickr.FlickrConstants.PAGE;
+import static com.flickr.FlickrConstants.PAGES;
 import static com.flickr.FlickrConstants.PHOTO;
 import static com.flickr.FlickrConstants.PHOTOS;
 import static com.flickr.FlickrConstants.PHOTOSET;
@@ -327,11 +329,13 @@ public class FlickrApi {
 
   }
 
-  public Set<String> getAllPhotosInSet(String setId, Token accessToken) {
+  private Element getPhotosInSetOfSinglePage(String setId, Token accessToken,
+      int page) {
     String url = getApiUrl(FLICKR_METHOD_GETPHOTOS);
     Map<String, String> params = new HashMap<String, String>();
     params.put(API_KEY, oAuth.getApiKey());
     params.put(PHOTOSET_ID, setId);
+    params.put(PAGE, page + "");
     OAuthRequest request = new OAuthRequest(Verb.GET, url);
     addQueryParams(request, params);
     Response response = oAuth.sendRequest(request, accessToken);
@@ -344,15 +348,47 @@ public class FlickrApi {
       LOG.error("Error while getting photos of set " + setId, e);
       return null;
     }
-    NodeList nodes = doc.getDocumentElement().getElementsByTagName(PHOTO);
+    Element docElement = doc.getDocumentElement();
+    return docElement;
+  }
+
+  public Set<String> getAllPhotosInSet(String setId, Token accessToken) {
     Set<String> photos = new TreeSet<String>();
+    Element docElement = getPhotosInSetOfSinglePage(setId, accessToken, 1);
+    NodeList photosets = docElement.getElementsByTagName(PHOTOSET);
+    photos.addAll(getPhotoTitlesFromDocElement(docElement));
+    int numOfPages = 1;
+    int total = 0;
+    if (photosets.getLength() > 0) {
+      Node pages = photosets.item(0).getAttributes().getNamedItem(PAGES);
+      if (pages != null) {
+        numOfPages = Integer.parseInt(pages.getNodeValue());
+      }
+      Node totalNode = photosets.item(0).getAttributes().getNamedItem("total");
+      if (totalNode != null) {
+        total = Integer.parseInt(totalNode.getNodeValue());
+      }
+    }
+    if (numOfPages > 1) {
+      for (int i = 2; i <= numOfPages; i++) {
+        docElement = getPhotosInSetOfSinglePage(setId, accessToken, i);
+        photos.addAll(getPhotoTitlesFromDocElement(docElement));
+      }
+    }
+
+    return photos;
+  }
+
+  private Set<String> getPhotoTitlesFromDocElement(Element docElement) {
+    NodeList nodes = docElement.getElementsByTagName(PHOTO);
+    Set<String> photos = new TreeSet<String>();
+    LOG.debug("Total photos in the response " + nodes.getLength());
     for (int i = 0; i < nodes.getLength(); i++) {
       Element element = (Element) nodes.item(i);
       photos.add(element.getAttribute(TITLE));
     }
     return photos;
   }
-
   public boolean uploadPhotosToSet(String id, Set<File> filesToBeUploaded,
       Token accessToken, boolean createNewSet) {
     String setId = null;

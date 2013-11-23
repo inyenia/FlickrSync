@@ -148,9 +148,6 @@ public class FlickrSync {
 
   private  void printFinalMetrics() {
       
-      for(Entry<String,String> entry:skippedFolders.entrySet()){
-	  System.out.println("Folder with path "+entry.getKey() + " was skipped as it had conflicting name with "+entry.getValue());
-      }
     Counter uploadFailure = FlickrApi.uploadFailure;
     System.out.println("Total upload failed " + uploadFailure.getCount());
     Timer photoUpload = MultiThreadedRequestExecution.requestMetrics;
@@ -187,6 +184,7 @@ public class FlickrSync {
     if (accessToken == null) {
       Token requestToken = oAuth.getRequestToken();
       String authUrl = oAuth.getAuthUrl(requestToken);
+      authUrl += "&perms=write";
       System.out.println("Enter the verifier code in console");
       if (!Desktop.isDesktopSupported()) {
         System.out.println("Please open the URL in browser" + authUrl);
@@ -217,6 +215,9 @@ public class FlickrSync {
     }
     Map<String, List<File>> folderToPhotos = new HashMap<String, List<File>>();
     sync.getAllDirs(new File(parentFolder), folders, folderToPhotos);
+    for(Entry<String,String> entry:sync.skippedFolders.entrySet()){
+	  System.out.println("Folder with path "+entry.getKey() + " was skipped as it had conflicting name with "+entry.getValue());
+      }
     Map<String, File> foldersNotUploaded = new HashMap<String, File>();
     for (Entry<String, File> folder : folders.entrySet()) {
       if (!photosets.containsKey(folder.getKey())) {
@@ -246,7 +247,8 @@ public class FlickrSync {
           continue;
         }
         for (File photo : photosInFolder) {
-          if (!photosInSet.contains(photo.getName())) {
+          String photoName = photo.getName();
+          if (!photosInSet.contains(photoName)) {
             photosToBeUploaded.add(photo);
           } else {
             if (deleteFromSource) {

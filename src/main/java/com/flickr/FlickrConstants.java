@@ -9,6 +9,8 @@ public interface FlickrConstants {
   public final String TITLE = "title";
   public final String API_KEY = "api_key";
   public final String PHOTOSET_ID = "photoset_id";
+  public final String PAGE = "page";
+  public final String PAGES = "pages";
   public final String PHOTO = "photo";
   public final String PHOTO_ID = "photoid";
   public final String PHOTO_UNERSCORE_ID = "photo_id";
