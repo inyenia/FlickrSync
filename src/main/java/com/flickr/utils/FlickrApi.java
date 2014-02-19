@@ -17,7 +17,7 @@ import static com.flickr.FlickrConstants.PHOTOS;
 import static com.flickr.FlickrConstants.PHOTOSET;
 import static com.flickr.FlickrConstants.PHOTOSET_ID;
 import static com.flickr.FlickrConstants.PHOTO_ID;
-import static com.flickr.FlickrConstants.PHOTO_UNERSCORE_ID;
+import static com.flickr.FlickrConstants.PHOTO_UNEDRSCORE_ID;
 import static com.flickr.FlickrConstants.PRIMARY_PHOTO_ID;
 import static com.flickr.FlickrConstants.TITLE;
 import static com.flickr.FlickrConstants.VIDEOS;
@@ -262,6 +262,7 @@ public class FlickrApi {
     return success;
   }
 
+
   private boolean addPhotoToSet(String photoSetId, String photoId,
       Token accessToken) {
     LOG.debug("Adding photo " + photoId + " to set " + photoSetId);
@@ -269,7 +270,7 @@ public class FlickrApi {
     Map<String, String> params = new HashMap<String, String>();
     params.put(API_KEY, oAuth.getApiKey());
     params.put(PHOTOSET_ID, photoSetId);
-    params.put(PHOTO_UNERSCORE_ID, photoId);
+    params.put(PHOTO_UNEDRSCORE_ID, photoId);
     OAuthRequest request = new OAuthRequest(Verb.POST, url);
     addBodyParams(request, params);
     Response response;

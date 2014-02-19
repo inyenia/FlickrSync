@@ -13,7 +13,7 @@ public interface FlickrConstants {
   public final String PAGES = "pages";
   public final String PHOTO = "photo";
   public final String PHOTO_ID = "photoid";
-  public final String PHOTO_UNERSCORE_ID = "photo_id";
+  public final String PHOTO_UNEDRSCORE_ID = "photo_id";
   public final String IS_PUBLIC = "is_public";
   public final String IS_FRIEND = "is_friend";
   public final String IS_FAMILY = "is_family";
@@ -23,5 +23,5 @@ public interface FlickrConstants {
   public final String FLICKR_METHOD_CREATE_SET = "flickr.photosets.create";
   public final String FLICKR_METHOD_GET_SET_PHOTOS = "flickr.photosets.getList";
   public final String FLICKR_METHOD_ADD_PHOTO_TO_SET = "flickr.photosets.addPhoto";
-
+  public final String FLICKR_METHOD_DELETE_PHOTO = "flickr.photos.delete";
 }

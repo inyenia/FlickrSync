@@ -1,16 +1,8 @@
 package com.flickr;
 
-import java.awt.Desktop;
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileFilter;
-import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -27,11 +19,12 @@ import org.slf4j.LoggerFactory;
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Timer;
 import com.flickr.oauth.OAuthHelper;
+import com.flickr.utils.AccessTokenUtil;
 import com.flickr.utils.FlickrApi;
 import com.flickr.utils.MultiThreadedRequestExecution;
 
 public class FlickrSync {
-  File accessTokenFile;
+
   private static final Logger LOG = LoggerFactory.getLogger(FlickrSync.class);
   private static final String API_KEY = "392695576b5b4163d9db90e2dbe78f48";
   private static final String API_SECRET = "97eb70a795d41310";
@@ -54,8 +47,6 @@ public class FlickrSync {
   };
 
   public FlickrSync(String foldersToBeIgnored) {
-    accessTokenFile = new File(System.getProperty("java.io.tmpdir"),
-        "flickr.tok");
     if (foldersToBeIgnored != null) {
       String[] ignored = foldersToBeIgnored.split(",");
       for (String ignoredFoler : ignored) {
@@ -64,33 +55,9 @@ public class FlickrSync {
     }
   }
 
-  private Token readAccessToken() throws IOException {
-    if (!accessTokenFile.exists())
-      return null;
-    BufferedReader reader = null;
-    Token token = null;
-    try {
-      reader = new BufferedReader(new FileReader(accessTokenFile));
-      token = new Token(reader.readLine(), reader.readLine());
-    } catch (Exception e) {
-      LOG.error("Error while reading access token file", e);
-    } finally {
-      if (reader != null)
-        reader.close();
-    }
-    return token;
-  }
 
-  private void writeAccessToken(Token token) throws IOException {
-    if (!accessTokenFile.exists())
-      accessTokenFile.createNewFile();
-    BufferedWriter writer = new BufferedWriter(new FileWriter(accessTokenFile));
-    writer.write(token.getToken());
-    writer.newLine();
-    writer.write(token.getSecret());
-    writer.close();
 
-  }
+
 
   private boolean isValidPhotoFile(File photo) {
     return filter.accept(photo);
@@ -180,31 +147,10 @@ public class FlickrSync {
     FlickrSync sync = new FlickrSync(foldersToBeIgnored);
     OAuthHelper oAuth = new OAuthHelper(API_KEY, API_SECRET);
     FlickrApi flickr = new FlickrApi(oAuth);
-    Token accessToken = sync.readAccessToken();
+    Token accessToken = AccessTokenUtil.readAccessToken();
     if (accessToken == null) {
-      Token requestToken = oAuth.getRequestToken();
-      String authUrl = oAuth.getAuthUrl(requestToken);
-      authUrl += "&perms=write";
-      System.out.println("Enter the verifier code in console");
-      if (!Desktop.isDesktopSupported()) {
-        System.out.println("Please open the URL in browser" + authUrl);
-      } else {
-        Desktop desktop = Desktop.getDesktop();
-        if (!desktop.isSupported(Desktop.Action.BROWSE)) {
-          System.out.println("Please open the URL in browser :" + authUrl);
-        } else {
-          try {
-            desktop.browse(new URI(authUrl));
-          } catch (URISyntaxException e) {
-            System.out.println("Please open the URL in browser :" + authUrl);
-          }
-        }
-      }
-      String verifier = new BufferedReader(new InputStreamReader(System.in))
-          .readLine();
-
-      accessToken = oAuth.getAccessToken(verifier, requestToken);
-      sync.writeAccessToken(accessToken);
+      accessToken = AccessTokenUtil.getAccessToken(oAuth);
+      AccessTokenUtil.writeAccessToken(accessToken);
 
     }
     Map<String, File> folders = new HashMap<String, File>();
